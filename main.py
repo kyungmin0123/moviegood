@@ -1,3 +1,4 @@
+```python
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -22,8 +23,9 @@ st.set_page_config(
 )
 
 st.title("🎬 영화 흥행 예측기")
+
 st.write(
-    "박스오피스 데이터와 영화 정보를 이용하여 "
+    "박스오피스 데이터와 영화 정보를 결합하여 "
     "영화의 총 관객 수를 다중 회귀로 예측합니다."
 )
 
@@ -50,14 +52,22 @@ MOVIES_URL = (
 @st.cache_data
 def load_data():
 
-    daily = pd.read_csv(DAILY_URL, encoding="utf-8")
-    movies = pd.read_csv(MOVIES_URL, encoding="utf-8")
+    daily = pd.read_csv(
+        DAILY_URL,
+        encoding="utf-8"
+    )
+
+    movies = pd.read_csv(
+        MOVIES_URL,
+        encoding="utf-8"
+    )
 
     return daily, movies
 
 
 try:
     daily, movies = load_data()
+
 except Exception as e:
     st.error("데이터를 불러오는 중 오류가 발생했습니다.")
     st.exception(e)
@@ -65,10 +75,9 @@ except Exception as e:
 
 
 # =========================================================
-# 데이터 전처리
+# 날짜 전처리
 # =========================================================
 
-# 날짜
 daily["날짜"] = pd.to_datetime(
     daily["날짜"].astype(str),
     format="%Y%m%d",
@@ -87,20 +96,32 @@ movies["first_date"] = pd.to_datetime(
     errors="coerce"
 )
 
-# 영화 코드 문자열 통일
-daily["영화코드"] = daily["영화코드"].astype(str).str.strip()
-movies["movieCd"] = movies["movieCd"].astype(str).str.strip()
+
+# =========================================================
+# 영화 코드 통일
+# =========================================================
+
+daily["영화코드"] = (
+    daily["영화코드"]
+    .astype(str)
+    .str.strip()
+)
+
+movies["movieCd"] = (
+    movies["movieCd"]
+    .astype(str)
+    .str.strip()
+)
 
 
 # =========================================================
-# daily 데이터에서 영화별 첫 관측일 정보 만들기
+# 박스오피스 데이터에서 영화별 첫 관측값 추출
 # =========================================================
 
 daily_sorted = daily.sort_values(
     ["영화코드", "날짜", "순위"]
 ).copy()
 
-# 영화별 첫 관측 기록
 first_daily = (
     daily_sorted
     .groupby("영화코드", as_index=False)
@@ -126,7 +147,7 @@ first_daily = first_daily[
 
 
 # =========================================================
-# 두 데이터 합치기
+# 두 데이터 결합
 # =========================================================
 
 df = movies.merge(
@@ -136,13 +157,9 @@ df = movies.merge(
     how="left"
 )
 
-# 영화 정보표의 모든 영화를 사용하기 위해
-# movies를 기준으로 left join을 사용함.
-
 
 # =========================================================
-# 장르 전처리
-# 여러 장르가 | 로 연결되어 있으면 첫 번째 장르만 사용
+# 장르
 # =========================================================
 
 df["genre"] = (
@@ -154,6 +171,11 @@ df["genre"] = (
     .str.strip()
 )
 
+
+# =========================================================
+# 국가
+# =========================================================
+
 df["nation"] = (
     df["nation"]
     .fillna("미상")
@@ -163,12 +185,12 @@ df["nation"] = (
 
 
 # =========================================================
-# 개봉월 / 개봉요일 등 파생변수
+# 파생 변수
 # =========================================================
 
 df["개봉월"] = df["openDt"].dt.month
 
-df["개봉요일"] = df["openDt"].dt.dayofweek
+df["개봉요일번호"] = df["openDt"].dt.dayofweek
 
 weekday_map = {
     0: "월요일",
@@ -180,180 +202,97 @@ weekday_map = {
     6: "일요일"
 }
 
-df["개봉요일"] = df["개봉요일"].map(weekday_map)
-
-
-# =========================================================
-# 사용할 수치형 변수
-# =========================================================
-
-numeric_features = {
-    "first_scrn": "첫 관측일 스크린수",
-    "first_show": "첫 관측일 상영횟수",
-    "first_week_audi": "첫 주 관객",
-    "days_in_top10": "10위권 등장일수",
-    "peak": "성수기 개봉 여부",
-    "첫관측_일관객": "박스오피스 첫 관측일 관객",
-    "첫관측_스크린수": "박스오피스 첫 관측일 스크린수",
-    "첫관측_상영횟수": "박스오피스 첫 관측일 상영횟수"
-}
-
-categorical_features = {
-    "genre": "장르",
-    "nation": "국가",
-    "개봉요일": "개봉요일"
-}
-
-date_features = {
-    "개봉월": "개봉월"
-}
-
-
-# =========================================================
-# 화면 - 데이터 기간
-# =========================================================
-
-all_dates = daily["날짜"].dropna()
-
-if len(all_dates) > 0:
-    min_date = all_dates.min()
-    max_date = all_dates.max()
-
-    st.info(
-        f"📅 기준 기간: "
-        f"{min_date.strftime('%Y-%m-%d')} ~ "
-        f"{max_date.strftime('%Y-%m-%d')}"
-    )
-
-
-# =========================================================
-# 변수 선택
-# =========================================================
-
-st.subheader("1️⃣ 예측에 사용할 변수 선택")
-
-st.write(
-    "체크한 변수만 회귀 모델의 입력값으로 사용됩니다. "
-    "목표값은 영화의 `total_audi(총 관객)`입니다."
-)
-
-selected_numeric = []
-selected_categorical = []
-selected_date = []
-
-
-col1, col2, col3 = st.columns(3)
-
-
-with col1:
-    st.markdown("### 🔢 수치형 변수")
-
-    for column, label in numeric_features.items():
-
-        default = column in [
-            "first_scrn",
-            "first_show",
-            "first_week_audi",
-            "days_in_top10",
-            "peak"
-        ]
-
-        if st.checkbox(
-            label,
-            value=default,
-            key=f"numeric_{column}"
-        ):
-            selected_numeric.append(column)
-
-
-with col2:
-    st.markdown("### 🏷️ 범주형 변수")
-
-    for column, label in categorical_features.items():
-
-        default = column in [
-            "genre",
-            "nation"
-        ]
-
-        if st.checkbox(
-            label,
-            value=default,
-            key=f"categorical_{column}"
-        ):
-            selected_categorical.append(column)
-
-
-with col3:
-    st.markdown("### 📅 날짜 관련 변수")
-
-    for column, label in date_features.items():
-
-        default = True
-
-        if st.checkbox(
-            label,
-            value=default,
-            key=f"date_{column}"
-        ):
-            selected_date.append(column)
-
-
-selected_features = (
-    selected_numeric
-    + selected_categorical
-    + selected_date
-)
-
-
-if len(selected_features) == 0:
-    st.warning("⚠️ 최소 1개 이상의 변수를 선택해 주세요.")
-    st.stop()
-
-
-st.success(
-    "선택된 변수: "
-    + ", ".join(
-        [numeric_features.get(x, categorical_features.get(x, date_features.get(x, x)))
-         for x in selected_features]
-    )
+df["개봉요일"] = (
+    df["개봉요일번호"]
+    .map(weekday_map)
 )
 
 
 # =========================================================
-# 목표값 확인
+# 숫자형 변환
 # =========================================================
 
-df["total_audi"] = pd.to_numeric(
-    df["total_audi"],
-    errors="coerce"
+numeric_columns = [
+    "first_scrn",
+    "first_show",
+    "first_week_audi",
+    "total_audi",
+    "days_in_top10",
+    "peak",
+    "첫관측_일관객",
+    "첫관측_스크린수",
+    "첫관측_상영횟수"
+]
+
+for col in numeric_columns:
+
+    if col in df.columns:
+
+        df[col] = pd.to_numeric(
+            df[col],
+            errors="coerce"
+        )
+
+
+# =========================================================
+# 기준 기간
+# =========================================================
+
+valid_dates = daily["날짜"].dropna()
+
+if len(valid_dates) > 0:
+
+    min_date = valid_dates.min()
+    max_date = valid_dates.max()
+
+else:
+
+    min_date = None
+    max_date = None
+
+
+st.info(
+    f"📅 기준 기간: "
+    f"{min_date.strftime('%Y-%m-%d')} ~ "
+    f"{max_date.strftime('%Y-%m-%d')}"
 )
 
-# 목표값이 없는 영화는 모델을 만들 수 없으므로 제외
-model_df = df.dropna(subset=["total_audi"]).copy()
+
+# =========================================================
+# 사용할 영화 전체
+# =========================================================
+
+model_df = df.dropna(
+    subset=["total_audi"]
+).copy()
 
 
 # =========================================================
-# 영화코드 순으로 정렬
+# 영화코드 순 정렬
 # =========================================================
 
-model_df["movieCd_sort"] = model_df["movieCd"].astype(str)
+model_df["movieCd_sort"] = (
+    model_df["movieCd"]
+    .astype(str)
+)
 
-model_df = model_df.sort_values(
-    "movieCd_sort"
-).reset_index(drop=True)
+model_df = (
+    model_df
+    .sort_values("movieCd_sort")
+    .reset_index(drop=True)
+)
 
 
 # =========================================================
-# 10편마다 앞의 3편을 시험용으로 지정
-# 나머지 7편은 학습용
+# 시험용 / 학습용 구분
 #
-# 0,1,2 -> 시험
-# 3,4,5,6,7,8,9 -> 학습
-# 반복
+# 10편마다 앞 3편 = 시험용
+# 나머지 7편 = 학습용
 # =========================================================
 
-model_df["순번"] = np.arange(len(model_df))
+model_df["순번"] = np.arange(
+    len(model_df)
+)
 
 model_df["데이터구분"] = np.where(
     model_df["순번"] % 10 < 3,
@@ -372,35 +311,40 @@ test_df = model_df[
 
 
 # =========================================================
-# X / y
+# 모델별 변수
 # =========================================================
 
-X_train = train_df[selected_features].copy()
-X_test = test_df[selected_features].copy()
-
-y_train = train_df["total_audi"].copy()
-y_test = test_df["total_audi"].copy()
-
-
-# =========================================================
-# 전처리 파이프라인
-# =========================================================
-
-numeric_selected = [
-    x for x in selected_features
-    if x in numeric_features or x in date_features
+# 기본 3가지 변수
+basic_features = [
+    "first_scrn",
+    "first_show",
+    "peak"
 ]
 
-categorical_selected = [
-    x for x in selected_features
-    if x in categorical_features
+# 기본 3가지 + 첫 주 관객
+extended_features = [
+    "first_scrn",
+    "first_show",
+    "peak",
+    "first_week_audi"
 ]
 
 
-transformers = []
+feature_labels = {
+    "first_scrn": "첫 관측일 스크린수",
+    "first_show": "첫 관측일 상영횟수",
+    "peak": "성수기 개봉 여부",
+    "first_week_audi": "첫 주 관객"
+}
 
 
-if len(numeric_selected) > 0:
+# =========================================================
+# 모델 만드는 함수
+# =========================================================
+
+def make_model(features):
+
+    numeric_features = features
 
     numeric_pipeline = Pipeline(
         steps=[
@@ -415,112 +359,83 @@ if len(numeric_selected) > 0:
         ]
     )
 
-    transformers.append(
-        (
-            "numeric",
-            numeric_pipeline,
-            numeric_selected
-        )
-    )
-
-
-if len(categorical_selected) > 0:
-
-    categorical_pipeline = Pipeline(
-        steps=[
+    preprocessor = ColumnTransformer(
+        transformers=[
             (
-                "imputer",
-                SimpleImputer(strategy="most_frequent")
-            ),
-            (
-                "onehot",
-                OneHotEncoder(
-                    handle_unknown="ignore"
-                )
+                "numeric",
+                numeric_pipeline,
+                numeric_features
             )
         ]
     )
 
-    transformers.append(
-        (
-            "categorical",
-            categorical_pipeline,
-            categorical_selected
-        )
+    model = Pipeline(
+        steps=[
+            (
+                "preprocessor",
+                preprocessor
+            ),
+            (
+                "regression",
+                LinearRegression()
+            )
+        ]
     )
 
-
-preprocessor = ColumnTransformer(
-    transformers=transformers,
-    remainder="drop"
-)
+    return model
 
 
 # =========================================================
-# 다중 회귀 모델
+# 모델 학습 및 평가 함수
 # =========================================================
 
-model = Pipeline(
-    steps=[
-        (
-            "preprocessor",
-            preprocessor
-        ),
-        (
-            "regression",
-            LinearRegression()
-        )
-    ]
-)
+def train_and_evaluate(features):
 
+    X_train = train_df[features].copy()
+    X_test = test_df[features].copy()
 
-# =========================================================
-# 학습
-# =========================================================
+    y_train = train_df["total_audi"].copy()
+    y_test = test_df["total_audi"].copy()
 
-model.fit(
-    X_train,
-    y_train
-)
+    model = make_model(features)
 
+    model.fit(
+        X_train,
+        y_train
+    )
 
-# =========================================================
-# 시험용 데이터 예측
-# =========================================================
+    prediction = model.predict(
+        X_test
+    )
 
-pred = model.predict(X_test)
+    prediction = np.asarray(
+        prediction
+    )
 
-pred = np.asarray(pred)
+    result = test_df[
+        [
+            "movieCd",
+            "movieNm",
+            "total_audi"
+        ]
+    ].copy()
 
-test_df["예측_총관객"] = pred
+    result["예측_총관객"] = prediction
 
-test_df["예측_총관객"] = (
-    test_df["예측_총관객"]
-    .replace([np.inf, -np.inf], np.nan)
-)
+    valid = (
+        result["total_audi"].notna()
+        & result["예측_총관객"].notna()
+    )
 
+    actual = result.loc[
+        valid,
+        "total_audi"
+    ].astype(float)
 
-# =========================================================
-# 점수 계산
-# =========================================================
-
-valid_mask = (
-    test_df["예측_총관객"].notna()
-    & test_df["total_audi"].notna()
-)
-
-actual = test_df.loc[
-    valid_mask,
-    "total_audi"
-].astype(float)
-
-predicted = test_df.loc[
-    valid_mask,
-    "예측_총관객"
-].astype(float)
-
-
-if len(actual) > 0:
+    predicted = result.loc[
+        valid,
+        "예측_총관객"
+    ].astype(float)
 
     r2 = r2_score(
         actual,
@@ -539,174 +454,288 @@ if len(actual) > 0:
         )
     )
 
-    # 실제 관객이 0인 경우 MAPE 계산에서 제외
-    mape_mask = actual != 0
+    return model, result, r2, mae, rmse
 
-    if mape_mask.sum() > 0:
 
-        mape = np.mean(
-            np.abs(
-                (actual[mape_mask] - predicted[mape_mask])
-                / actual[mape_mask]
-            )
-        ) * 100
+# =========================================================
+# 두 모델 실행
+# =========================================================
 
-    else:
-        mape = np.nan
+basic_model, basic_result, basic_r2, basic_mae, basic_rmse = (
+    train_and_evaluate(
+        basic_features
+    )
+)
+
+extended_model, extended_result, extended_r2, extended_mae, extended_rmse = (
+    train_and_evaluate(
+        extended_features
+    )
+)
+
+
+# =========================================================
+# 모델 비교
+# =========================================================
+
+st.subheader(
+    "1️⃣ 두 모델의 예측 성능 비교"
+)
+
+st.write(
+    "두 모델 모두 같은 영화들을 학습용과 시험용으로 나누어 "
+    "동일한 조건에서 평가했습니다."
+)
+
+
+col1, col2 = st.columns(2)
+
+
+with col1:
+
+    st.markdown("### 🔵 기본 모델")
+
+    st.write(
+        "**사용 변수**"
+    )
+
+    st.write(
+        "• 첫 관측일 스크린수  \n"
+        "• 첫 관측일 상영횟수  \n"
+        "• 성수기 개봉 여부"
+    )
+
+    st.metric(
+        "R² 예측 점수",
+        f"{basic_r2:.3f}"
+    )
+
+    st.metric(
+        "평균 절대 오차",
+        f"{basic_mae:,.0f}명"
+    )
+
+
+with col2:
+
+    st.markdown("### 🟢 첫 주 관객 추가 모델")
+
+    st.write(
+        "**사용 변수**"
+    )
+
+    st.write(
+        "• 첫 관측일 스크린수  \n"
+        "• 첫 관측일 상영횟수  \n"
+        "• 성수기 개봉 여부  \n"
+        "• **첫 주 관객**"
+    )
+
+    st.metric(
+        "R² 예측 점수",
+        f"{extended_r2:.3f}"
+    )
+
+    st.metric(
+        "평균 절대 오차",
+        f"{extended_mae:,.0f}명"
+    )
+
+
+# =========================================================
+# 성능 변화
+# =========================================================
+
+r2_change = extended_r2 - basic_r2
+mae_change = extended_mae - basic_mae
+
+
+st.markdown("### 📈 첫 주 관객을 추가했을 때")
+
+c1, c2 = st.columns(2)
+
+
+with c1:
+
+    st.metric(
+        "R² 변화",
+        f"{r2_change:+.3f}"
+    )
+
+
+with c2:
+
+    st.metric(
+        "MAE 변화",
+        f"{mae_change:+,.0f}명"
+    )
+
+
+if r2_change > 0:
+
+    st.success(
+        "첫 주 관객 수를 추가했을 때 R²가 높아져 "
+        "시험용 데이터에서의 예측 설명력이 좋아졌습니다."
+    )
+
+elif r2_change < 0:
+
+    st.warning(
+        "첫 주 관객 수를 추가했을 때 R²가 낮아졌습니다."
+    )
 
 else:
 
-    r2 = np.nan
-    mae = np.nan
-    rmse = np.nan
-    mape = np.nan
+    st.info(
+        "두 모델의 R²가 동일합니다."
+    )
 
 
 # =========================================================
-# 결과 요약
+# 데이터 사용 현황
 # =========================================================
 
-st.subheader("2️⃣ 모델 평가 결과")
+st.subheader(
+    "2️⃣ 학습 및 평가 데이터"
+)
 
-c1, c2, c3, c4 = st.columns(4)
+c1, c2, c3 = st.columns(3)
+
 
 with c1:
+
+    st.metric(
+        "전체 영화",
+        f"{len(model_df)}편"
+    )
+
+
+with c2:
+
     st.metric(
         "학습에 사용한 영화",
         f"{len(train_df)}편"
     )
 
-with c2:
+
+with c3:
+
     st.metric(
         "점수를 잰 영화",
         f"{len(test_df)}편"
     )
 
-with c3:
-    st.metric(
-        "R² 예측 점수",
-        f"{r2:.3f}"
-        if not np.isnan(r2)
-        else "-"
-    )
-
-with c4:
-    st.metric(
-        "평균 절대 오차",
-        f"{mae:,.0f}명"
-        if not np.isnan(mae)
-        else "-"
-    )
-
 
 st.write(
-    f"📌 기준 기간: "
+    f"📅 **기준 기간:** "
     f"{min_date.strftime('%Y-%m-%d')} ~ "
     f"{max_date.strftime('%Y-%m-%d')}"
 )
 
 
-st.markdown("### 📊 추가 평가 지표")
-
-m1, m2 = st.columns(2)
-
-with m1:
-    st.write(
-        f"**RMSE:** "
-        f"{rmse:,.0f}명"
-        if not np.isnan(rmse)
-        else "**RMSE:** -"
-    )
-
-with m2:
-    st.write(
-        f"**MAPE:** "
-        f"{mape:.2f}%"
-        if not np.isnan(mape)
-        else "**MAPE:** -"
-    )
-
-
 # =========================================================
-# 시험용 영화 중 1,000명 미만 예측
+# 중요 안내
 # =========================================================
 
-low_prediction_mask = (
-    test_df["예측_총관객"] < 1000
-)
+st.warning(
+    """
+    ⚠️ **중요: 이 결과는 실제 개봉 전 흥행 예측 성능이 아닙니다.**
 
-low_count = low_prediction_mask.sum()
+    이 데이터의 `first_scrn`, `first_show`, `first_week_audi` 등의 값은
+    영화가 이미 개봉하고 박스오피스에 등장한 뒤 집계된 사후 데이터입니다.
 
+    특히 `첫 주 관객`은 영화의 첫 주 흥행 결과가 이미 발생한 뒤 알 수 있는 값입니다.
 
-st.info(
-    f"📍 시험용 영화 중 예측 관객 수가 "
-    f"1,000명보다 작은 영화: **{low_count}편**"
+    따라서 이 모델의 점수는
+    **'개봉 전에 흥행을 얼마나 정확하게 예측할 수 있는가'**를 의미하지 않습니다.
+
+    여기서는 주어진 사후 집계 데이터를 이용하여
+    **선택한 변수들이 총 관객 수와 얼마나 관련되어 있는지**를 비교하는
+    분석용 모델로 해석하는 것이 적절합니다.
+    """
 )
 
 
 # =========================================================
-# 실제 vs 예측 산점도
+# 산점도
 # =========================================================
 
 st.subheader(
-    "3️⃣ 실제 총 관객 수와 예측 총 관객 수"
+    "3️⃣ 실제 총 관객 수 vs 예측 총 관객 수"
 )
 
 st.write(
     "가로축은 시험용 영화의 실제 총 관객 수, "
-    "세로축은 모델이 예측한 총 관객 수입니다. "
-    "점선은 예측이 실제와 정확히 같은 경우입니다."
+    "세로축은 예측한 총 관객 수입니다."
 )
 
+plot_df = basic_result.copy()
 
-plot_df = test_df.copy()
+plot_df["기본_예측"] = basic_result[
+    "예측_총관객"
+]
 
-# 로그축을 사용하려면 양수여야 하므로
-# 실제값이 0 이하인 경우 표시에서 제외
+plot_df["첫주추가_예측"] = extended_result[
+    "예측_총관객"
+]
+
 plot_df = plot_df[
     (plot_df["total_audi"] > 0)
-    & plot_df["예측_총관객"].notna()
+    & plot_df["기본_예측"].notna()
+    & plot_df["첫주추가_예측"].notna()
 ].copy()
 
 
-# 예측값이 1,000 미만인 영화는 그래프 바닥에 붙임
-plot_df["그래프_예측값"] = plot_df["예측_총관객"].clip(
-    lower=1
+# =========================================================
+# 그래프 범위
+# =========================================================
+
+all_values = pd.concat(
+    [
+        plot_df["total_audi"],
+        plot_df["기본_예측"].clip(lower=1),
+        plot_df["첫주추가_예측"].clip(lower=1)
+    ]
 )
 
-low_df = plot_df[
-    plot_df["예측_총관객"] < 1000
-].copy()
+min_value = max(
+    1,
+    all_values.min()
+)
 
+max_value = max(
+    all_values.max(),
+    1
+)
+
+
+# =========================================================
+# Plotly 산점도
+# =========================================================
 
 fig = go.Figure()
 
 
-# 일반 시험용 영화
-normal_df = plot_df[
-    plot_df["예측_총관객"] >= 1000
-].copy()
-
-
+# 기본 모델
 fig.add_trace(
     go.Scatter(
-        x=normal_df["total_audi"],
-        y=normal_df["그래프_예측값"],
+        x=plot_df["total_audi"],
+        y=plot_df["기본_예측"].clip(lower=1),
         mode="markers",
-        name="시험용 영화",
-        text=normal_df["movieNm"],
+        name="기본 모델",
+        text=plot_df["movieNm"],
         customdata=np.column_stack(
             [
-                normal_df["movieCd"],
-                normal_df["예측_총관객"],
-                normal_df["total_audi"]
+                plot_df["movieCd"],
+                plot_df["total_audi"],
+                plot_df["기본_예측"]
             ]
         ),
         hovertemplate=(
             "<b>%{text}</b><br>"
             "영화코드: %{customdata[0]}<br>"
-            "실제 총 관객: %{customdata[2]:,.0f}명<br>"
-            "예측 총 관객: %{customdata[1]:,.0f}명"
+            "실제 총 관객: %{customdata[1]:,.0f}명<br>"
+            "기본 모델 예측: %{customdata[2]:,.0f}명"
             "<extra></extra>"
         ),
         marker=dict(
@@ -716,69 +745,49 @@ fig.add_trace(
 )
 
 
-# 1,000명 미만 예측 영화
-if len(low_df) > 0:
-
-    fig.add_trace(
-        go.Scatter(
-            x=low_df["total_audi"],
-            y=np.full(
-                len(low_df),
-                1
-            ),
-            mode="markers",
-            name="예측 1,000명 미만",
-            text=low_df["movieNm"],
-            customdata=np.column_stack(
-                [
-                    low_df["movieCd"],
-                    low_df["예측_총관객"],
-                    low_df["total_audi"]
-                ]
-            ),
-            hovertemplate=(
-                "<b>%{text}</b><br>"
-                "영화코드: %{customdata[0]}<br>"
-                "실제 총 관객: %{customdata[2]:,.0f}명<br>"
-                "예측 총 관객: %{customdata[1]:,.0f}명"
-                "<extra></extra>"
-            ),
-            marker=dict(
-                size=11,
-                symbol="triangle-down"
-            )
+# 첫 주 관객 추가 모델
+fig.add_trace(
+    go.Scatter(
+        x=plot_df["total_audi"],
+        y=plot_df["첫주추가_예측"].clip(lower=1),
+        mode="markers",
+        name="첫 주 관객 추가 모델",
+        text=plot_df["movieNm"],
+        customdata=np.column_stack(
+            [
+                plot_df["movieCd"],
+                plot_df["total_audi"],
+                plot_df["첫주추가_예측"]
+            ]
+        ),
+        hovertemplate=(
+            "<b>%{text}</b><br>"
+            "영화코드: %{customdata[0]}<br>"
+            "실제 총 관객: %{customdata[1]:,.0f}명<br>"
+            "첫 주 관객 추가 모델 예측: %{customdata[2]:,.0f}명"
+            "<extra></extra>"
+        ),
+        marker=dict(
+            size=9,
+            symbol="diamond"
         )
     )
+)
 
 
-# =========================================================
 # 실제 = 예측 기준선
-# =========================================================
-
-if len(plot_df) > 0:
-
-    min_value = max(
-        1,
-        plot_df["total_audi"].min()
+fig.add_trace(
+    go.Scatter(
+        x=[min_value, max_value],
+        y=[min_value, max_value],
+        mode="lines",
+        name="실제 = 예측",
+        line=dict(
+            dash="dash"
+        ),
+        hoverinfo="skip"
     )
-
-    max_value = max(
-        plot_df["total_audi"].max(),
-        plot_df["그래프_예측값"].max()
-    )
-
-    fig.add_trace(
-        go.Scatter(
-            x=[min_value, max_value],
-            y=[min_value, max_value],
-            mode="lines",
-            name="실제 = 예측",
-            line=dict(
-                dash="dash"
-            ),
-            hoverinfo="skip"
-        )
-    )
+)
 
 
 fig.update_xaxes(
@@ -794,9 +803,9 @@ fig.update_yaxes(
 )
 
 fig.update_layout(
-    height=700,
+    height=750,
     hovermode="closest",
-    legend_title="구분"
+    legend_title="모델"
 )
 
 
@@ -807,160 +816,155 @@ st.plotly_chart(
 
 
 # =========================================================
-# 1,000명 미만 예측 영화 설명
+# 1,000명 미만 예측
 # =========================================================
 
-if low_count > 0:
+basic_low = (
+    plot_df["기본_예측"] < 1000
+).sum()
 
-    st.caption(
-        "▼ 삼각형으로 표시된 영화는 예측값이 1,000명 미만이라 "
-        "로그 그래프의 바닥에 붙여 표시했습니다."
+extended_low = (
+    plot_df["첫주추가_예측"] < 1000
+).sum()
+
+
+c1, c2 = st.columns(2)
+
+
+with c1:
+
+    st.info(
+        f"🔵 기본 모델: 예측 1,000명 미만 **{basic_low}편**"
+    )
+
+
+with c2:
+
+    st.info(
+        f"🟢 첫 주 관객 추가 모델: "
+        f"예측 1,000명 미만 **{extended_low}편**"
     )
 
 
 # =========================================================
-# 영화별 실제 / 예측 결과
+# 시험용 영화 결과표
 # =========================================================
 
-st.subheader("4️⃣ 시험용 영화별 예측 결과")
+st.subheader(
+    "4️⃣ 시험용 영화별 예측 결과"
+)
 
-result_table = test_df[
+comparison = basic_result[
     [
         "movieCd",
         "movieNm",
-        "total_audi",
-        "예측_총관객",
-        "데이터구분"
+        "total_audi"
     ]
 ].copy()
 
-result_table = result_table.rename(
+comparison["기본 모델 예측"] = (
+    basic_result["예측_총관객"]
+)
+
+comparison["첫 주 관객 추가 모델 예측"] = (
+    extended_result["예측_총관객"]
+)
+
+comparison["기본 모델 오차"] = (
+    comparison["기본 모델 예측"]
+    - comparison["total_audi"]
+)
+
+comparison["첫 주 관객 추가 모델 오차"] = (
+    comparison["첫 주 관객 추가 모델 예측"]
+    - comparison["total_audi"]
+)
+
+comparison = comparison.rename(
     columns={
         "movieCd": "영화코드",
         "movieNm": "영화명",
-        "total_audi": "실제 총 관객",
-        "예측_총관객": "예측 총 관객",
-        "데이터구분": "구분"
+        "total_audi": "실제 총 관객"
     }
 )
 
-result_table["예측 오차"] = (
-    result_table["예측 총 관객"]
-    - result_table["실제 총 관객"]
-)
-
-result_table["절대 오차"] = (
-    result_table["예측 오차"]
-    .abs()
-)
-
-result_table = result_table.sort_values(
+comparison = comparison.sort_values(
     "영화코드"
 ).reset_index(drop=True)
 
 
 st.dataframe(
-    result_table.style.format(
+    comparison.style.format(
         {
             "실제 총 관객": "{:,.0f}",
-            "예측 총 관객": "{:,.0f}",
-            "예측 오차": "{:,.0f}",
-            "절대 오차": "{:,.0f}"
+            "기본 모델 예측": "{:,.0f}",
+            "첫 주 관객 추가 모델 예측": "{:,.0f}",
+            "기본 모델 오차": "{:,.0f}",
+            "첫 주 관객 추가 모델 오차": "{:,.0f}"
         }
     ),
     use_container_width=True,
-    height=500
+    height=550
 )
 
 
 # =========================================================
-# 전체 데이터 사용 현황
+# 사용 변수
 # =========================================================
 
-st.subheader("5️⃣ 데이터 사용 현황")
-
-info_col1, info_col2, info_col3 = st.columns(3)
-
-with info_col1:
-    st.metric(
-        "영화 정보표 전체 영화",
-        f"{len(movies)}편"
-    )
-
-with info_col2:
-    st.metric(
-        "모델에 사용된 영화",
-        f"{len(model_df)}편"
-    )
-
-with info_col3:
-    st.metric(
-        "박스오피스 데이터 행",
-        f"{len(daily):,}개"
-    )
-
-
-st.write(
-    "영화 정보표를 기준으로 데이터를 결합했기 때문에 "
-    "영화 정보표에 존재하는 영화들을 모두 대상으로 사용했습니다."
+st.subheader(
+    "5️⃣ 모델에 사용한 변수"
 )
 
-st.write(
-    "영화코드 순으로 정렬한 뒤 10편씩 묶어 각 묶음의 "
-    "앞 3편을 시험용, 뒤 7편을 학습용으로 지정했습니다."
-)
+v1, v2 = st.columns(2)
 
 
-# =========================================================
-# 사용한 변수
-# =========================================================
+with v1:
 
-with st.expander("🔎 현재 모델에 사용된 변수 보기"):
+    st.markdown("### 🔵 기본 모델")
 
-    st.write(
-        "선택한 입력 변수:"
-    )
-
-    for feature in selected_features:
-
-        label = (
-            numeric_features.get(feature)
-            or categorical_features.get(feature)
-            or date_features.get(feature)
-            or feature
-        )
+    for feature in basic_features:
 
         st.write(
-            f"- **{label}** (`{feature}`)"
+            f"- {feature_labels[feature]}"
         )
 
-    st.write(
-        "**예측 대상:** `total_audi` (총 관객)"
-    )
+
+with v2:
+
+    st.markdown("### 🟢 첫 주 관객 추가 모델")
+
+    for feature in extended_features:
+
+        st.write(
+            f"- {feature_labels[feature]}"
+        )
 
 
 # =========================================================
-# 주의사항
+# 모델 설명
 # =========================================================
 
-with st.expander("ℹ️ 예측 방법 설명"):
+with st.expander("🔎 모델 평가 방법 자세히 보기"):
 
     st.write(
         """
-        이 앱은 다중 선형회귀(Linear Regression)를 사용합니다.
+        영화 정보표의 모든 영화를 영화코드 순으로 정렬합니다.
 
-        영화코드 순으로 영화들을 정렬한 뒤 10편 단위로 나누고,
-        각 10편 중 앞의 3편은 모델 학습에서 제외하여 시험용으로 사용합니다.
+        정렬된 영화를 10편씩 묶은 뒤 각 묶음의 앞 3편을
+        시험용 데이터로 떼어 놓고, 나머지 7편을 학습용 데이터로 사용합니다.
 
-        따라서 시험용 영화의 실제 총 관객 수는 모델 학습에 사용되지 않습니다.
+        이 과정을 반복하여 전체 영화 중 약 30%를 시험용으로 사용합니다.
 
-        선택한 장르·국가·개봉요일 같은 범주형 변수는
-        원-핫 인코딩을 통해 숫자로 변환합니다.
+        두 모델은 정확히 같은 시험용 영화를 사용하기 때문에
+        R²와 MAE를 비교하여 '첫 주 관객' 변수를 추가했을 때
+        성능이 어떻게 달라지는지 확인할 수 있습니다.
 
-        또한 입력 변수의 크기 차이를 줄이기 위해 수치형 변수는
-        표준화한 뒤 회귀 모델에 넣습니다.
+        R²는 1에 가까울수록 실제 총 관객 수의 변동을
+        모델이 잘 설명한다는 의미입니다.
 
-        산점도의 점선은 '실제 관객 수 = 예측 관객 수'를 의미합니다.
-        점선에 가까울수록 예측이 실제에 가깝습니다.
+        MAE는 예측값과 실제값의 평균적인 차이입니다.
+        따라서 MAE는 작을수록 좋습니다.
         """
     )
+```
