@@ -1,4 +1,3 @@
-```python
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -967,4 +966,3 @@ with st.expander("🔎 모델 평가 방법 자세히 보기"):
         따라서 MAE는 작을수록 좋습니다.
         """
     )
-```
